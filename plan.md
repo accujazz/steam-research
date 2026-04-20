@@ -161,16 +161,18 @@ def list_cache_files(cache_dir='cache') -> list[str]
 
 ## `calculator.py` — Key Functions
 
-Defaults: `sales_coeff=0.7`, `regional_coeff=0.65`, `steam_cut=0.30`, `taxes=0.10`, `wishlist_coeff=13`
+Defaults: `sales_coeff=0.7`, `regional_coeff=0.65`, `steam_cut=0.30`, `taxes=0.10`, `wishlist_coeff=13`, `reviews_multiplier=30`
 
 ```python
-def compute_revenue(total_reviews, price_usd, sales_coeff, regional_coeff, steam_cut, taxes) -> float
-    # price_usd * reviews_30d * 30 * sales_coeff * regional_coeff * (1 - steam_cut) * (1 - taxes)
+def compute_revenue(reviews, price_usd, reviews_multiplier, sales_coeff, regional_coeff, steam_cut, taxes) -> float | None
+    # Returns None if reviews is None (window hasn't elapsed)
+    # price_usd * reviews * reviews_multiplier * sales_coeff * regional_coeff * (1 - steam_cut) * (1 - taxes)
 
-def enrich_records(records, wishlist_coeff, sales_coeff, regional_coeff, steam_cut, taxes) -> list
+def enrich_records(records, wishlist_coeff, reviews_multiplier, sales_coeff, regional_coeff, steam_cut, taxes) -> list
     # Adds: total_reviews, review_score, price_usd (steam_price_initial / 100),
     #       wishlist_estimate = followers * wishlist_coeff
-    #       revenue_estimate = compute_revenue(...)
+    #       revenue_total, revenue_30d, revenue_1y, revenue_3y  (None if reviews field is None)
+    #       revenue_estimate = revenue_30d if available, else revenue_total (used for summary/charts)
 
 def compute_quartiles(records, field='revenue_estimate') -> dict
 def to_dataframe(records) -> pd.DataFrame
@@ -183,15 +185,15 @@ def to_dataframe(records) -> pd.DataFrame
 **Sidebar:**
 - Top: **Previous Runs** — 10 most recent as buttons; older runs collapsed in expander. Clicking loads run and sets `?run=<filepath>` query param.
 - Data source: mode (tag/manual). Tag mode: tags input, AND/OR logic (default AND), min reviews pre-filter (default 100), max games (default 50).
-- Revenue coefficients: `sales_coeff`, `regional_coeff`, `steam_cut` slider (default 30%), `taxes` slider (default 10%), `wishlist_coeff` (default 13).
+- Revenue coefficients: `reviews_multiplier` (default 30), `sales_coeff`, `regional_coeff`, `steam_cut` slider (default 30%), `taxes` slider (default 10%), `wishlist_coeff` (default 13).
 - Fetch Data button.
 
 Changing coefficients re-runs `enrich_records()` without re-fetching.
 
 **Main area header:** active run name displayed as `st.header` (h2) with a 🗑️ delete button — deletes the JSON file, clears session, returns to empty state.
 
-**Games Table columns:** name, Steam Page link (`store.steampowered.com/app/<appid>/`, constructed at display time), reviews (total/30d/1yr/3yr), review score, price (initial/non-discounted), revenue est., wishlist est., followers, EA, release date, genres.
-Reviews (1yr/3yr) show empty if window hasn't elapsed.
+**Games Table columns:** name, Steam Page link (`store.steampowered.com/app/<appid>/`, constructed at display time), reviews (total/30d/1yr/3yr), review score, price (initial/non-discounted), revenue (total/30d/1yr/3yr), wishlist est., followers, EA, release date, genres.
+Revenue and review fields show empty when the time window hasn't elapsed.
 
 **Charts:** revenue histogram (log scale + quartile lines), price vs reviews scatter (size=revenue, color=EA).
 
@@ -229,8 +231,9 @@ Replaced `total_reviews × 12` with `followers × 10`, where followers = Steam C
 SteamSpy owner estimates were too inaccurate. Field dropped entirely. Revenue formula uses `total_reviews` as the base multiplier.
 
 ### Revenue formula
-`revenue_estimate = price × reviews_30d × 30 × sales_coeff × regional_coeff × (1 − steam_cut) × (1 − taxes)`
-Falls back to `total_reviews` when `reviews_30d` is `None` (game released less than 30 days ago).
+`revenue = price × reviews × reviews_multiplier × sales_coeff × regional_coeff × (1 − steam_cut) × (1 − taxes)`
+Four revenue fields: `revenue_total`, `revenue_30d`, `revenue_1y`, `revenue_3y` — each `None` when the corresponding reviews window hasn't elapsed.
+`revenue_estimate` (used for summary/charts) = `revenue_30d` if available, else `revenue_total`.
 Defaults: `sales_coeff=0.7`, `regional_coeff=0.65`, `steam_cut=0.30`, `taxes=0.10`.
 Price uses `price_overview.initial` (non-discounted) from Steam Store API.
 

@@ -1,27 +1,34 @@
 import pandas as pd
 import numpy as np
+from typing import Optional
 
 DEFAULT_SALES_COEFF = 0.7
 DEFAULT_REGIONAL_COEFF = 0.65
 DEFAULT_STEAM_CUT = 0.30
 DEFAULT_TAXES = 0.10
 DEFAULT_WISHLIST_COEFF = 13
+DEFAULT_REVIEWS_MULTIPLIER = 30
 
 
 def compute_revenue(
-    total_reviews: int,
+    reviews: Optional[int],
     price_usd: float,
+    reviews_multiplier: int = DEFAULT_REVIEWS_MULTIPLIER,
     sales_coeff: float = DEFAULT_SALES_COEFF,
     regional_coeff: float = DEFAULT_REGIONAL_COEFF,
     steam_cut: float = DEFAULT_STEAM_CUT,
     taxes: float = DEFAULT_TAXES,
-) -> float:
-    return price_usd * total_reviews * 30 * sales_coeff * regional_coeff * (1 - steam_cut) * (1 - taxes)
+) -> Optional[float]:
+    """Returns None if reviews is None (window hasn't elapsed)."""
+    if reviews is None:
+        return None
+    return price_usd * reviews * reviews_multiplier * sales_coeff * regional_coeff * (1 - steam_cut) * (1 - taxes)
 
 
 def enrich_records(
     records: list,
     wishlist_coeff: int = DEFAULT_WISHLIST_COEFF,
+    reviews_multiplier: int = DEFAULT_REVIEWS_MULTIPLIER,
     sales_coeff: float = DEFAULT_SALES_COEFF,
     regional_coeff: float = DEFAULT_REGIONAL_COEFF,
     steam_cut: float = DEFAULT_STEAM_CUT,
@@ -35,28 +42,34 @@ def enrich_records(
         total = positive + negative
         rec["total_reviews"] = total
         rec["review_score"] = (positive / total) if total > 0 else 0.0
-        followers = rec.get("followers") or 0
-        rec["wishlist_estimate"] = followers * wishlist_coeff
+        rec["wishlist_estimate"] = (rec.get("followers") or 0) * wishlist_coeff
 
         steam_price = rec.get("steam_price")
         price_usd = (steam_price / 100) if steam_price else 0.0
         rec["price_usd"] = price_usd
 
-        reviews_for_revenue = rec.get("reviews_30d") if rec.get("reviews_30d") is not None else rec.get("total_reviews", 0)
-        rec["revenue_estimate"] = compute_revenue(
-            reviews_for_revenue or 0,
-            rec.get("price_usd", 0) or 0,
-            sales_coeff,
-            regional_coeff,
-            steam_cut,
-            taxes,
+        kwargs = dict(
+            price_usd=price_usd,
+            reviews_multiplier=reviews_multiplier,
+            sales_coeff=sales_coeff,
+            regional_coeff=regional_coeff,
+            steam_cut=steam_cut,
+            taxes=taxes,
         )
+        rec["revenue_total"] = compute_revenue(total, **kwargs)
+        rec["revenue_30d"]   = compute_revenue(rec.get("reviews_30d"), **kwargs)
+        rec["revenue_1y"]    = compute_revenue(rec.get("reviews_1y"), **kwargs)
+        rec["revenue_3y"]    = compute_revenue(rec.get("reviews_3y"), **kwargs)
+
+        # Primary revenue for summary/charts: 30d, fallback to total for <30d games
+        rec["revenue_estimate"] = rec["revenue_30d"] if rec["revenue_30d"] is not None else rec["revenue_total"]
+
         enriched.append(rec)
     return enriched
 
 
 def compute_quartiles(records: list, field: str = "revenue_estimate") -> dict:
-    values = [r.get(field, 0) or 0 for r in records if r.get(field) is not None]
+    values = [r.get(field) for r in records if r.get(field) is not None]
     if not values:
         return {"min": 0, "Q1": 0, "median": 0, "Q3": 0, "max": 0, "mean": 0}
     arr = np.array(values, dtype=float)

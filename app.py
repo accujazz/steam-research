@@ -8,6 +8,7 @@ import streamlit as st
 
 from calculator import (
     DEFAULT_REGIONAL_COEFF,
+    DEFAULT_REVIEWS_MULTIPLIER,
     DEFAULT_SALES_COEFF,
     DEFAULT_STEAM_CUT,
     DEFAULT_TAXES,
@@ -90,6 +91,7 @@ with st.sidebar:
 
     st.divider()
     st.header("Revenue Coefficients")
+    reviews_multiplier = st.number_input("Reviews multiplier", 1, 200, DEFAULT_REVIEWS_MULTIPLIER, step=1)
     sales_coeff = st.number_input("Sales coefficient", 0.1, 5.0, DEFAULT_SALES_COEFF, step=0.1)
     regional_coeff = st.number_input("Regional coefficient", 0.1, 3.0, DEFAULT_REGIONAL_COEFF, step=0.05)
     steam_cut = st.slider("Steam cut %", 0, 50, int(DEFAULT_STEAM_CUT * 100)) / 100
@@ -186,6 +188,7 @@ raw_records = st.session_state["records"]
 enriched = enrich_records(
     raw_records,
     wishlist_coeff=int(wishlist_coeff),
+    reviews_multiplier=int(reviews_multiplier),
     sales_coeff=sales_coeff,
     regional_coeff=regional_coeff,
     steam_cut=steam_cut,
@@ -248,8 +251,9 @@ with tab2:
 
     display_cols = [
         "name", "store_url", "total_reviews", "reviews_30d", "reviews_1y", "reviews_3y",
-        "review_score", "price_usd", "revenue_estimate", "wishlist_estimate",
-        "followers", "is_early_access", "release_date", "genres",
+        "review_score", "price_usd",
+        "revenue_total", "revenue_30d", "revenue_1y", "revenue_3y",
+        "wishlist_estimate", "followers", "is_early_access", "release_date", "genres",
     ]
     fdf = to_dataframe(filtered)
     fdf["store_url"] = fdf.index.map(lambda a: f"https://store.steampowered.com/app/{a}/")
@@ -266,7 +270,10 @@ with tab2:
             "reviews_3y": st.column_config.NumberColumn("Reviews (3yr)"),
             "review_score": st.column_config.ProgressColumn("Score", min_value=0, max_value=1, format="%.2f"),
             "price_usd": st.column_config.NumberColumn("Price $", format="$%.2f"),
-            "revenue_estimate": st.column_config.NumberColumn("Revenue Est.", format="$%d"),
+            "revenue_total": st.column_config.NumberColumn("Revenue (total)", format="$%d"),
+            "revenue_30d": st.column_config.NumberColumn("Revenue (30d)", format="$%d"),
+            "revenue_1y": st.column_config.NumberColumn("Revenue (1yr)", format="$%d"),
+            "revenue_3y": st.column_config.NumberColumn("Revenue (3yr)", format="$%d"),
             "wishlist_estimate": st.column_config.NumberColumn("Wishlists Est."),
             "followers": st.column_config.NumberColumn("Followers"),
             "is_early_access": st.column_config.CheckboxColumn("EA"),
