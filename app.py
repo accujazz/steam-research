@@ -36,6 +36,8 @@ with st.sidebar:
     if mode == "Tag Discovery":
         tags_input = st.text_input("Tags (comma-separated)", "Roguelite")
         logic = st.radio("Tag logic", ["OR", "AND"])
+        min_tag_reviews = st.number_input("Min reviews (pre-filter)", 0, 100000, 100, step=50)
+        max_results = st.number_input("Max games to fetch", 10, 2000, 200, step=10)
         slug_input = st.text_input("Research slug (for cache filename)", "genre_research")
     else:
         ids_input = st.text_area("App IDs (one per line or comma-separated)", "")
@@ -79,7 +81,7 @@ if fetch_btn:
             st.stop()
 
         with st.spinner("Discovering apps by tag…"):
-            discovered = discover_apps(tags, logic=logic)
+            discovered = discover_apps(tags, logic=logic, min_reviews=int(min_tag_reviews), max_results=int(max_results))
 
         if not discovered:
             st.warning("No apps found for those tags.")

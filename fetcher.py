@@ -102,11 +102,19 @@ def _parse_release_date(raw: str) -> Optional[str]:
     return raw
 
 
-def fetch_tag_apps(tag: str) -> Dict[int, str]:
+def fetch_tag_apps(tag: str) -> Dict[int, Dict]:
+    """Returns {appid: {"name": str, "positive": int, "negative": int}} for all games with the tag."""
     resp = requests.get(STEAMSPY_URL, params={"request": "tag", "tag": tag}, timeout=15)
     resp.raise_for_status()
     data = resp.json()
-    return {int(appid): info.get("name", "") for appid, info in data.items()}
+    return {
+        int(appid): {
+            "name": info.get("name", ""),
+            "positive": int(info.get("positive", 0) or 0),
+            "negative": int(info.get("negative", 0) or 0),
+        }
+        for appid, info in data.items()
+    }
 
 
 def fetch_steamspy_details(appid: int) -> dict:
@@ -196,8 +204,13 @@ def fetch_steam_group_followers(appid: int) -> Optional[int]:
         return None
 
 
-def discover_apps(tags: List[str], logic: Literal["AND", "OR"] = "OR") -> Dict[int, str]:
-    results: List[Dict[int, str]] = []
+def discover_apps(
+    tags: List[str],
+    logic: Literal["AND", "OR"] = "OR",
+    min_reviews: int = 0,
+    max_results: Optional[int] = None,
+) -> Dict[int, str]:
+    results: List[Dict[int, Dict]] = []
     for tag in tags:
         try:
             apps = fetch_tag_apps(tag.strip())
@@ -213,18 +226,35 @@ def discover_apps(tags: List[str], logic: Literal["AND", "OR"] = "OR") -> Dict[i
         common_ids = set(results[0].keys())
         for r in results[1:]:
             common_ids &= set(r.keys())
-        merged: Dict[int, str] = {}
+        merged: Dict[int, Dict] = {}
         for appid in common_ids:
             for r in results:
                 if appid in r:
                     merged[appid] = r[appid]
                     break
-        return merged
     else:
         merged = {}
         for r in results:
             merged.update(r)
-        return merged
+
+    if min_reviews > 0:
+        merged = {
+            appid: info for appid, info in merged.items()
+            if info["positive"] + info["negative"] >= min_reviews
+        }
+
+    result = {appid: info["name"] for appid, info in merged.items()}
+
+    if max_results and len(result) > max_results:
+        # Keep highest-review games when capping
+        sorted_ids = sorted(
+            merged.keys(),
+            key=lambda a: merged[a]["positive"] + merged[a]["negative"],
+            reverse=True,
+        )
+        result = {appid: merged[appid]["name"] for appid in sorted_ids[:max_results]}
+
+    return result
 
 
 def enrich_apps(

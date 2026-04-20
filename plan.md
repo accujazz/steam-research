@@ -138,7 +138,9 @@ def fetch_steam_group_followers(appid: int) -> int | None
 def _reviews_in_window(appid, release_date_str, days) -> int | None
     # Returns None if window end date hasn't elapsed yet
 def build_game_record(appid, spy_data, store_data) -> GameRecord
-def discover_apps(tags, logic: 'AND'|'OR') -> dict[int, str]
+def discover_apps(tags, logic: 'AND'|'OR', min_reviews=0, max_results=None) -> dict[int, str]
+    # Filters by min_reviews using SteamSpy tag response data (no extra API calls)
+    # Caps at max_results keeping highest-review games
 def enrich_apps(appids, progress_callback, spy_delay, store_delay) -> list[GameRecord]
     # Per app: SteamSpy → Store API → Steam Review API (total + 3 windows)
     #          → Community Group XML (followers)
@@ -171,6 +173,7 @@ def to_dataframe(records) -> pd.DataFrame
 ## `app.py` — Streamlit Layout
 
 **Sidebar:** mode (tag/manual), revenue coefficients, wishlist/follower ratio, cache load, Fetch button.
+In Tag Discovery mode: **Min reviews (pre-filter)** (default 100) and **Max games to fetch** (default 200) — both applied after discovery, before enrichment.
 Changing coefficients re-runs `enrich_records()` without re-fetching.
 
 **Games Table columns:** name, reviews (total/30d/1yr/3yr), review score, price, revenue est., wishlist est., followers, EA, release date, tags.
@@ -207,3 +210,6 @@ SteamSpy owner estimates (extrapolated from review counts) were too inaccurate t
 ### Revenue formula base: total_reviews, not owners
 `revenue_estimate = total_reviews × price × sales_coeff × regional_coeff × (1 − steam_cut)`
 Default coefficients: `sales_coeff=0.7`, `regional_coeff=0.65`.
+
+### Tag discovery pre-filtering
+SteamSpy tag endpoint returns `positive`/`negative` counts per game alongside app IDs. `discover_apps` now accepts `min_reviews` (default 100) and `max_results` (default 200) — games below the review threshold are dropped, and if the result set still exceeds the cap, the top N by review count are kept. Both filters apply before enrichment so no API calls are wasted on excluded games.
