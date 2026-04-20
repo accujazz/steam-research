@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 
 import pandas as pd
 import plotly.express as px
@@ -9,6 +10,7 @@ from calculator import (
     DEFAULT_REGIONAL_COEFF,
     DEFAULT_SALES_COEFF,
     DEFAULT_STEAM_CUT,
+    DEFAULT_TAXES,
     DEFAULT_WISHLIST_COEFF,
     compute_quartiles,
     enrich_records,
@@ -25,11 +27,54 @@ from fetcher import (
 logging.basicConfig(level=logging.WARNING)
 
 st.set_page_config(layout="wide", page_title="Steam Genre Research")
-st.title("Steam Genre Research")
+
+
+def _run_label(filepath: str) -> str:
+    """cache/roguelite_20260420.json → 'roguelite · 2026-04-20'"""
+    base = os.path.splitext(os.path.basename(filepath))[0]
+    parts = base.rsplit("_", 1)
+    if len(parts) == 2 and len(parts[1]) == 8 and parts[1].isdigit():
+        d = parts[1]
+        date_str = f"{d[:4]}-{d[4:6]}-{d[6:]}"
+        return f"{parts[0]} · {date_str}"
+    return base
+
+
+# ── Auto-load from query param ────────────────────────────────────────────────
+
+qp_run = st.query_params.get("run")
+if qp_run and "records" not in st.session_state:
+    try:
+        st.session_state["records"] = load_cache(qp_run)
+        st.session_state["active_run"] = qp_run
+    except Exception:
+        st.query_params.clear()
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 
 with st.sidebar:
+    # ── Previous runs ──
+    cache_files = list_cache_files()
+    if cache_files:
+        st.header("Previous Runs")
+        recent, older = cache_files[:10], cache_files[10:]
+        for cf in recent:
+            if st.button(_run_label(cf), key=f"run_{cf}", use_container_width=True):
+                st.session_state["records"] = load_cache(cf)
+                st.session_state["active_run"] = cf
+                st.query_params["run"] = cf
+                st.rerun()
+        if older:
+            with st.expander(f"{len(older)} older runs"):
+                for cf in older:
+                    if st.button(_run_label(cf), key=f"run_{cf}", use_container_width=True):
+                        st.session_state["records"] = load_cache(cf)
+                        st.session_state["active_run"] = cf
+                        st.query_params["run"] = cf
+                        st.rerun()
+        st.divider()
+
+    # ── Data source ──
     st.header("Data Source")
     mode = st.radio("Input mode", ["Manual App IDs", "Tag Discovery"])
 
@@ -47,21 +92,15 @@ with st.sidebar:
     st.header("Revenue Coefficients")
     sales_coeff = st.number_input("Sales coefficient", 0.1, 5.0, DEFAULT_SALES_COEFF, step=0.1)
     regional_coeff = st.number_input("Regional coefficient", 0.1, 3.0, DEFAULT_REGIONAL_COEFF, step=0.05)
-    steam_cut = st.slider("Steam cut %", 0, 40, int(DEFAULT_STEAM_CUT * 100)) / 100
+    steam_cut = st.slider("Steam cut %", 0, 50, int(DEFAULT_STEAM_CUT * 100)) / 100
+    taxes = st.slider("Taxes %", 0, 50, int(DEFAULT_TAXES * 100)) / 100
     wishlist_coeff = st.number_input("Wishlist / follower ratio", 1, 50, DEFAULT_WISHLIST_COEFF)
-
-    st.divider()
-    st.header("Cache")
-    cache_files = list_cache_files()
-    cache_options = ["(none)"] + cache_files
-    selected_cache = st.selectbox("Load existing run", cache_options)
-    load_btn = st.button("Load from cache")
 
     st.divider()
     fetch_btn = st.button("Fetch Data", type="primary")
 
 
-# ── Fetch / Load ─────────────────────────────────────────────────────────────
+# ── Fetch ─────────────────────────────────────────────────────────────────────
 
 def _parse_manual_ids(raw: str) -> list[int]:
     parts = raw.replace("\n", ",").split(",")
@@ -119,21 +158,28 @@ if fetch_btn:
     st.success(f"Fetched {len(records)} games. Saved to `{cache_path}`.")
 
     st.session_state["records"] = records
-
-elif load_btn and selected_cache != "(none)":
-    try:
-        records = load_cache(selected_cache)
-        st.session_state["records"] = records
-        st.success(f"Loaded {len(records)} games from `{selected_cache}`.")
-    except Exception as e:
-        st.error(f"Failed to load cache: {e}")
+    st.session_state["active_run"] = cache_path
+    st.query_params["run"] = cache_path
+    st.rerun()
 
 
 # ── Main Dashboard ────────────────────────────────────────────────────────────
 
 if "records" not in st.session_state:
-    st.info("Use the sidebar to fetch data or load a cached run.")
+    st.info("Use the sidebar to fetch data or load a previous run.")
     st.stop()
+
+active_run = st.session_state.get("active_run")
+if active_run:
+    col_title, col_del = st.columns([8, 1])
+    col_title.header(_run_label(active_run))
+    if col_del.button("🗑️", help="Delete this run", key="delete_run"):
+        if os.path.exists(active_run):
+            os.remove(active_run)
+        del st.session_state["records"]
+        del st.session_state["active_run"]
+        st.query_params.clear()
+        st.rerun()
 
 raw_records = st.session_state["records"]
 
@@ -143,6 +189,7 @@ enriched = enrich_records(
     sales_coeff=sales_coeff,
     regional_coeff=regional_coeff,
     steam_cut=steam_cut,
+    taxes=taxes,
 )
 
 df = to_dataframe(enriched)
@@ -291,4 +338,3 @@ with tab3:
                         size_max=40,
                     )
                     st.plotly_chart(fig2, use_container_width=True)
-

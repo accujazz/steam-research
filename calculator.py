@@ -4,6 +4,7 @@ import numpy as np
 DEFAULT_SALES_COEFF = 0.7
 DEFAULT_REGIONAL_COEFF = 0.65
 DEFAULT_STEAM_CUT = 0.30
+DEFAULT_TAXES = 0.10
 DEFAULT_WISHLIST_COEFF = 13
 
 
@@ -13,10 +14,9 @@ def compute_revenue(
     sales_coeff: float = DEFAULT_SALES_COEFF,
     regional_coeff: float = DEFAULT_REGIONAL_COEFF,
     steam_cut: float = DEFAULT_STEAM_CUT,
+    taxes: float = DEFAULT_TAXES,
 ) -> float:
-    if not price_usd:
-        return 0.0
-    return total_reviews * price_usd * sales_coeff * regional_coeff * (1 - steam_cut)
+    return price_usd * total_reviews * 30 * sales_coeff * regional_coeff * (1 - steam_cut) * (1 - taxes)
 
 
 def enrich_records(
@@ -25,6 +25,7 @@ def enrich_records(
     sales_coeff: float = DEFAULT_SALES_COEFF,
     regional_coeff: float = DEFAULT_REGIONAL_COEFF,
     steam_cut: float = DEFAULT_STEAM_CUT,
+    taxes: float = DEFAULT_TAXES,
 ) -> list:
     enriched = []
     for r in records:
@@ -41,12 +42,14 @@ def enrich_records(
         price_usd = (steam_price / 100) if steam_price else 0.0
         rec["price_usd"] = price_usd
 
+        reviews_for_revenue = rec.get("reviews_30d") if rec.get("reviews_30d") is not None else rec.get("total_reviews", 0)
         rec["revenue_estimate"] = compute_revenue(
-            rec.get("total_reviews", 0) or 0,
-            price_usd,
+            reviews_for_revenue or 0,
+            rec.get("price_usd", 0) or 0,
             sales_coeff,
             regional_coeff,
             steam_cut,
+            taxes,
         )
         enriched.append(rec)
     return enriched

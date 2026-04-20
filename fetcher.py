@@ -100,7 +100,7 @@ def build_game_record(appid: int, name: str, store_data: Optional[dict]) -> Game
         record["name"] = store_data.get("name", name)
 
         price_overview = store_data.get("price_overview") or {}
-        record["steam_price"] = price_overview.get("final")
+        record["steam_price"] = price_overview.get("initial")
 
         release = store_data.get("release_date") or {}
         record["release_date"] = _parse_release_date(release.get("date", ""))
