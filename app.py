@@ -31,13 +31,13 @@ st.title("Steam Genre Research")
 
 with st.sidebar:
     st.header("Data Source")
-    mode = st.radio("Input mode", ["Tag Discovery", "Manual App IDs"])
+    mode = st.radio("Input mode", ["Manual App IDs", "Tag Discovery"])
 
     if mode == "Tag Discovery":
         tags_input = st.text_input("Tags (comma-separated)", "Roguelite")
-        logic = st.radio("Tag logic", ["OR", "AND"])
+        logic = st.radio("Tag logic", ["AND", "OR"])
         min_tag_reviews = st.number_input("Min reviews (pre-filter)", 0, 100000, 100, step=50)
-        max_results = st.number_input("Max games to fetch", 10, 2000, 200, step=10)
+        max_results = st.number_input("Max games to fetch", 10, 2000, 50, step=10)
         slug_input = st.text_input("Research slug (for cache filename)", "genre_research")
     else:
         ids_input = st.text_area("App IDs (one per line or comma-separated)", "")
