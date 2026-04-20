@@ -81,7 +81,7 @@ if fetch_btn:
             st.stop()
 
         with st.spinner("Discovering apps by tag…"):
-            discovered = discover_apps(tags, logic=logic, min_reviews=int(min_tag_reviews), max_results=int(max_results))
+            discovered = discover_apps(tags, logic=logic, max_results=int(max_results))
 
         if not discovered:
             st.warning("No apps found for those tags.")
@@ -90,6 +90,7 @@ if fetch_btn:
         appids = list(discovered.keys())
         st.info(f"Found {len(appids)} apps. Fetching details…")
     else:
+        discovered = {}
         appids = _parse_manual_ids(ids_input)
         if not appids:
             st.error("Enter at least one valid App ID.")
@@ -101,7 +102,12 @@ if fetch_btn:
         pct = current / total
         progress_bar.progress(pct, text=f"[{current}/{total}] {name}")
 
-    records = enrich_apps(appids, progress_callback=_progress)
+    records = enrich_apps(
+        appids,
+        names=discovered,
+        progress_callback=_progress,
+        min_reviews=int(min_tag_reviews) if mode == "Tag Discovery" else 0,
+    )
     progress_bar.empty()
 
     if not records:
@@ -194,17 +200,19 @@ with tab2:
     st.caption(f"Showing {len(filtered)} of {len(enriched)} games")
 
     display_cols = [
-        "name", "total_reviews", "reviews_30d", "reviews_1y", "reviews_3y",
+        "name", "store_url", "total_reviews", "reviews_30d", "reviews_1y", "reviews_3y",
         "review_score", "price_usd", "revenue_estimate", "wishlist_estimate",
-        "followers", "is_early_access", "release_date", "tags",
+        "followers", "is_early_access", "release_date", "genres",
     ]
     fdf = to_dataframe(filtered)
+    fdf["store_url"] = fdf.index.map(lambda a: f"https://store.steampowered.com/app/{a}/")
     cols_present = [c for c in display_cols if c in fdf.columns]
 
     st.dataframe(
         fdf[cols_present],
         column_config={
             "name": st.column_config.TextColumn("Name"),
+            "store_url": st.column_config.LinkColumn("Steam Page", display_text="Open"),
             "total_reviews": st.column_config.NumberColumn("Reviews (total)"),
             "reviews_30d": st.column_config.NumberColumn("Reviews (30d)"),
             "reviews_1y": st.column_config.NumberColumn("Reviews (1yr)"),

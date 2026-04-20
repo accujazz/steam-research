@@ -10,10 +10,13 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-STEAMSPY_URL = "https://steamspy.com/api.php"
 STEAM_STORE_URL = "https://store.steampowered.com/api/appdetails"
 STEAM_REVIEWS_URL = "https://store.steampowered.com/appreviews"
 STEAM_GROUP_URL = "https://steamcommunity.com/games"
+STEAM_TAGS_URL = "https://store.steampowered.com/tagdata/populartags/english"
+STEAM_SEARCH_URL = "https://store.steampowered.com/search/results/"
+
+_tag_cache: Optional[Dict[str, int]] = None  # name_lower -> tagid
 
 
 class GameRecord(TypedDict, total=False):
@@ -21,9 +24,6 @@ class GameRecord(TypedDict, total=False):
     name: str
     positive: int
     negative: int
-    average_forever: int
-    steamspy_price: int
-    tags: Dict
     steam_price: Optional[int]
     release_date: Optional[str]
     is_early_access: bool
@@ -40,30 +40,55 @@ class GameRecord(TypedDict, total=False):
     revenue_estimate: float
 
 
-def parse_owners(owners_str: str) -> Tuple[int, int]:
-    nums = re.findall(r"[\d,]+", owners_str)
-    if len(nums) < 2:
-        return (0, 0)
-    low = int(nums[0].replace(",", ""))
-    high = int(nums[1].replace(",", ""))
-    return (low, high)
+def fetch_steam_tags() -> Dict[str, int]:
+    """Returns {tag_name_lower: tagid} for all Steam popular tags."""
+    global _tag_cache
+    if _tag_cache is not None:
+        return _tag_cache
+    resp = requests.get(STEAM_TAGS_URL, timeout=15)
+    resp.raise_for_status()
+    _tag_cache = {t["name"].lower(): t["tagid"] for t in resp.json()}
+    return _tag_cache
 
 
-def build_game_record(appid: int, spy_data: dict, store_data: Optional[dict]) -> GameRecord:
-    steamspy_price_raw = spy_data.get("price", 0)
-    try:
-        steamspy_price = int(steamspy_price_raw)
-    except (TypeError, ValueError):
-        steamspy_price = 0
+def fetch_steam_search_apps(tag_id: int, max_results: Optional[int] = None) -> Dict[int, str]:
+    """Returns {appid: name} by paginating Steam search for a tag ID."""
+    appid_re = re.compile(r"/apps/(\d+)/")
+    result: Dict[int, str] = {}
+    start = 0
+    while True:
+        resp = requests.get(
+            STEAM_SEARCH_URL,
+            params={"tags": tag_id, "json": 1, "start": start, "count": 100},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+        if not items:
+            break
+        for item in items:
+            m = appid_re.search(item.get("logo", ""))
+            if m:
+                appid = int(m.group(1))
+                result[appid] = item.get("name", "")
+        if max_results and len(result) >= max_results:
+            break
+        if len(items) < 100:
+            break
+        start += 100
+        time.sleep(0.5)
 
+    if max_results:
+        result = dict(list(result.items())[:max_results])
+    return result
+
+
+def build_game_record(appid: int, name: str, store_data: Optional[dict]) -> GameRecord:
     record: GameRecord = {
         "appid": appid,
-        "name": spy_data.get("name", ""),
-        "positive": int(spy_data.get("positive", 0) or 0),
-        "negative": int(spy_data.get("negative", 0) or 0),
-        "average_forever": int(spy_data.get("average_forever", 0) or 0),
-        "steamspy_price": steamspy_price,
-        "tags": spy_data.get("tags") or {},
+        "name": name,
+        "positive": 0,
+        "negative": 0,
         "steam_price": None,
         "release_date": None,
         "is_early_access": False,
@@ -72,12 +97,13 @@ def build_game_record(appid: int, spy_data: dict, store_data: Optional[dict]) ->
     }
 
     if store_data:
+        record["name"] = store_data.get("name", name)
+
         price_overview = store_data.get("price_overview") or {}
         record["steam_price"] = price_overview.get("final")
 
         release = store_data.get("release_date") or {}
-        raw_date = release.get("date", "")
-        record["release_date"] = _parse_release_date(raw_date)
+        record["release_date"] = _parse_release_date(release.get("date", ""))
 
         genres = store_data.get("genres") or []
         record["genres"] = [g.get("description", "") for g in genres]
@@ -100,27 +126,6 @@ def _parse_release_date(raw: str) -> Optional[str]:
         except ValueError:
             continue
     return raw
-
-
-def fetch_tag_apps(tag: str) -> Dict[int, Dict]:
-    """Returns {appid: {"name": str, "positive": int, "negative": int}} for all games with the tag."""
-    resp = requests.get(STEAMSPY_URL, params={"request": "tag", "tag": tag}, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
-    return {
-        int(appid): {
-            "name": info.get("name", ""),
-            "positive": int(info.get("positive", 0) or 0),
-            "negative": int(info.get("negative", 0) or 0),
-        }
-        for appid, info in data.items()
-    }
-
-
-def fetch_steamspy_details(appid: int) -> dict:
-    resp = requests.get(STEAMSPY_URL, params={"request": "appdetails", "appid": appid}, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
 
 
 def fetch_steam_store(appid: int) -> Optional[dict]:
@@ -189,16 +194,14 @@ def _reviews_in_window(appid: int, release_date_str: Optional[str], days: int) -
 
 def fetch_steam_group_followers(appid: int) -> Optional[int]:
     try:
-        import xml.etree.ElementTree as ET
         resp = requests.get(
             f"{STEAM_GROUP_URL}/{appid}/memberslistxml/",
             params={"xml": "1"},
             timeout=15,
         )
         resp.raise_for_status()
-        root = ET.fromstring(resp.text)
-        count = root.findtext("groupDetails/memberCount")
-        return int(count) if count else None
+        m = re.search(r"<memberCount>(\d+)</memberCount>", resp.text)
+        return int(m.group(1)) if m else None
     except Exception as e:
         logger.warning("Steam group followers failed for appid %d: %s", appid, e)
         return None
@@ -207,70 +210,58 @@ def fetch_steam_group_followers(appid: int) -> Optional[int]:
 def discover_apps(
     tags: List[str],
     logic: Literal["AND", "OR"] = "OR",
-    min_reviews: int = 0,
     max_results: Optional[int] = None,
 ) -> Dict[int, str]:
-    results: List[Dict[int, Dict]] = []
+    """Discover app IDs via Steam search. AND = intersection, OR = union.
+    max_results caps total returned (no pre-filtering by reviews — done in enrich_apps)."""
+    tag_map = fetch_steam_tags()
+    per_tag_results: List[Dict[int, str]] = []
+
     for tag in tags:
+        tag_id = tag_map.get(tag.strip().lower())
+        if tag_id is None:
+            logger.warning("Tag not found in Steam tag list: '%s'", tag)
+            continue
         try:
-            apps = fetch_tag_apps(tag.strip())
-            results.append(apps)
+            apps = fetch_steam_search_apps(tag_id, max_results=max_results)
+            per_tag_results.append(apps)
             time.sleep(1.0)
         except Exception as e:
             logger.warning("Failed to fetch tag '%s': %s", tag, e)
 
-    if not results:
+    if not per_tag_results:
         return {}
 
     if logic == "AND":
-        common_ids = set(results[0].keys())
-        for r in results[1:]:
+        common_ids = set(per_tag_results[0].keys())
+        for r in per_tag_results[1:]:
             common_ids &= set(r.keys())
-        merged: Dict[int, Dict] = {}
-        for appid in common_ids:
-            for r in results:
-                if appid in r:
-                    merged[appid] = r[appid]
-                    break
+        merged = {appid: per_tag_results[0][appid] for appid in common_ids if appid in per_tag_results[0]}
     else:
-        merged = {}
-        for r in results:
+        merged: Dict[int, str] = {}
+        for r in per_tag_results:
             merged.update(r)
 
-    if min_reviews > 0:
-        merged = {
-            appid: info for appid, info in merged.items()
-            if info["positive"] + info["negative"] >= min_reviews
-        }
+    if max_results and len(merged) > max_results:
+        merged = dict(list(merged.items())[:max_results])
 
-    result = {appid: info["name"] for appid, info in merged.items()}
-
-    if max_results and len(result) > max_results:
-        # Keep highest-review games when capping
-        sorted_ids = sorted(
-            merged.keys(),
-            key=lambda a: merged[a]["positive"] + merged[a]["negative"],
-            reverse=True,
-        )
-        result = {appid: merged[appid]["name"] for appid in sorted_ids[:max_results]}
-
-    return result
+    return merged
 
 
 def enrich_apps(
     appids: List[int],
+    names: Optional[Dict[int, str]] = None,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
-    spy_delay: float = 1.0,
     store_delay: float = 1.5,
+    min_reviews: int = 0,
 ) -> List[GameRecord]:
     records: List[GameRecord] = []
     total = len(appids)
+    names = names or {}
 
     for i, appid in enumerate(appids):
         try:
-            time.sleep(spy_delay)
-            spy_data = fetch_steamspy_details(appid)
-            name = spy_data.get("name", str(appid))
+            name = names.get(appid, str(appid))
 
             if progress_callback:
                 progress_callback(i + 1, total, name)
@@ -278,9 +269,15 @@ def enrich_apps(
             time.sleep(store_delay)
             store_data = fetch_steam_store(appid)
 
-            record = build_game_record(appid, spy_data, store_data)
+            # Apply min_reviews filter using recommendations.total from store API
+            if min_reviews > 0 and store_data:
+                total_recs = (store_data.get("recommendations") or {}).get("total", 0) or 0
+                if total_recs < min_reviews:
+                    logger.debug("Skipping appid %d (%s): %d reviews < %d", appid, name, total_recs, min_reviews)
+                    continue
 
-            # Always use Steam Review API for review counts — SteamSpy lags on newer games.
+            record = build_game_record(appid, name, store_data)
+
             review_data = fetch_steam_reviews(appid)
             if review_data:
                 record["positive"] = review_data["positive"]

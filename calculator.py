@@ -38,13 +38,7 @@ def enrich_records(
         rec["wishlist_estimate"] = followers * wishlist_coeff
 
         steam_price = rec.get("steam_price")
-        spy_price = rec.get("steamspy_price", 0) or 0
-        if steam_price is not None:
-            price_usd = steam_price / 100
-        elif spy_price:
-            price_usd = spy_price / 100
-        else:
-            price_usd = 0.0
+        price_usd = (steam_price / 100) if steam_price else 0.0
         rec["price_usd"] = price_usd
 
         rec["revenue_estimate"] = compute_revenue(
@@ -81,11 +75,6 @@ def to_dataframe(records: list) -> pd.DataFrame:
 
     if "release_date" in df.columns:
         df["release_date"] = pd.to_datetime(df["release_date"], errors="coerce")
-
-    if "tags" in df.columns:
-        df["tags"] = df["tags"].apply(
-            lambda t: ", ".join(list(t.keys())[:5]) if isinstance(t, dict) else ""
-        )
 
     if "genres" in df.columns:
         df["genres"] = df["genres"].apply(
