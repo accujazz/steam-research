@@ -82,12 +82,13 @@ with st.sidebar:
     if mode == "Tag Discovery":
         tags_input = st.text_input("Tags (comma-separated)", "Roguelite")
         logic = st.radio("Tag logic", ["AND", "OR"])
-        min_tag_reviews = st.number_input("Min reviews (pre-filter)", 0, 100000, 100, step=50)
         max_results = st.number_input("Max games to fetch", 10, 2000, 50, step=10)
         slug_input = st.text_input("Research slug (for cache filename)", "genre_research")
     else:
         ids_input = st.text_area("App IDs (one per line or comma-separated)", "")
         slug_input = st.text_input("Research slug (for cache filename)", "manual_research")
+
+    min_tag_reviews = st.number_input("Min reviews (pre-filter)", 0, 100000, 100, step=50)
 
     st.divider()
     st.header("Revenue Coefficients")
@@ -147,7 +148,7 @@ if fetch_btn:
         appids,
         names=discovered,
         progress_callback=_progress,
-        min_reviews=int(min_tag_reviews) if mode == "Tag Discovery" else 0,
+        min_reviews=int(min_tag_reviews),
     )
     progress_bar.empty()
 
