@@ -27,8 +27,10 @@ No third party tools other than Steam itself are being used.
 python3 -m streamlit run app.py
 
 ## Usage
-1. Define relevant App IDs or Steam tags that represent a targeted game niche. 
-2. Fetch data.
-3. Filter for revelance. Parameters to consider:
+1. Define Your Genre via Steam Tags.
+2. Go to [SteamDB Tag Explorer](steamdb.info/tags/), select relevant games and copy their App IDs.
+2. Paste App IDs from the previous step into the Data Source sidebar section.
+3. Fetch Data.
+4. Filter for revelance if needed. Parameters to consider:
 	- Market relevance (Release date > 2020)
-	- Reviews > 100 (a hard coded filter for now, todo: make an user adjustable setting)
+	- Reviews > 100
