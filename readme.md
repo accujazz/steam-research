@@ -1,6 +1,8 @@
 ## About
 Building a Streamlit dashboard for Steam game market research. The dashboard fetches data from Steam APIs, calculates estimated revenue, wishlists, and displays results in a sortable table with charts. Useful for genre analysis.
 
+![Screenshot](steam-genre-research.png)
+
 ## Uses
 - Steam popular tags list with name -> tagid mapping
 - Steam search API for paginated game discovery
@@ -23,7 +25,7 @@ Building a Streamlit dashboard for Steam game market research. The dashboard fet
 - release date
 - tags
 
-No third party tools other than Steam itself are being used.
+No third party services other than Steam itself are being used for data.
 
 ## Run locally
 1. Install dependencies
