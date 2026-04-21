@@ -92,9 +92,10 @@ def to_dataframe(records: list) -> pd.DataFrame:
     if "release_date" in df.columns:
         df["release_date"] = pd.to_datetime(df["release_date"], errors="coerce")
 
-    if "genres" in df.columns:
-        df["genres"] = df["genres"].apply(
-            lambda g: ", ".join(g) if isinstance(g, list) else ""
-        )
+    for col in ("genres", "tags"):
+        if col in df.columns:
+            df[col] = df[col].apply(
+                lambda v: ", ".join(v) if isinstance(v, list) else (v or "")
+            )
 
     return df

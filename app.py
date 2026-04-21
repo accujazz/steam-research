@@ -172,10 +172,14 @@ if "records" not in st.session_state:
     st.stop()
 
 active_run = st.session_state.get("active_run")
+def _is_local() -> bool:
+    host = st.context.headers.get("host", "")
+    return host.startswith("localhost") or host.startswith("127.0.0.1")
+
 if active_run:
     col_title, col_del = st.columns([8, 1])
     col_title.header(_run_label(active_run))
-    if col_del.button("🗑️", help="Delete this run", key="delete_run"):
+    if _is_local() and col_del.button("🗑️", help="Delete this run", key="delete_run"):
         if os.path.exists(active_run):
             os.remove(active_run)
         del st.session_state["records"]
@@ -253,7 +257,7 @@ with tab2:
         "name", "store_url", "total_reviews", "reviews_30d", "reviews_1y", "reviews_3y",
         "review_score", "price_usd",
         "revenue_total", "revenue_30d", "revenue_1y", "revenue_3y",
-        "wishlist_estimate", "followers", "is_early_access", "release_date", "genres",
+        "wishlist_estimate", "followers", "is_early_access", "release_date", "tags",
     ]
     fdf = to_dataframe(filtered)
     fdf["store_url"] = fdf.index.map(lambda a: f"https://store.steampowered.com/app/{a}/")

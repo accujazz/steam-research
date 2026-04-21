@@ -14,6 +14,7 @@ STEAM_STORE_URL = "https://store.steampowered.com/api/appdetails"
 STEAM_REVIEWS_URL = "https://store.steampowered.com/appreviews"
 STEAM_GROUP_URL = "https://steamcommunity.com/games"
 STEAM_TAGS_URL = "https://store.steampowered.com/tagdata/populartags/english"
+STEAM_APP_PAGE_URL = "https://store.steampowered.com/app"
 STEAM_SEARCH_URL = "https://store.steampowered.com/search/results/"
 
 _tag_cache: Optional[Dict[str, int]] = None  # name_lower -> tagid
@@ -29,6 +30,7 @@ class GameRecord(TypedDict, total=False):
     is_early_access: bool
     genres: List
     short_description: str
+    tags: List
     followers: Optional[int]
     reviews_30d: Optional[int]
     reviews_1y: Optional[int]
@@ -147,6 +149,24 @@ def fetch_steam_store(appid: int) -> Optional[dict]:
     except requests.exceptions.RequestException as e:
         logger.warning("Steam Store API failed for appid %d: %s", appid, e)
         return None
+
+
+def fetch_steam_store_tags(appid: int) -> List[str]:
+    """Scrapes user-curated tags from the Steam store page."""
+    try:
+        resp = requests.get(
+            f"{STEAM_APP_PAGE_URL}/{appid}",
+            headers={"Accept-Language": "en-US"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        m = re.search(r"InitAppTagModal\(\s*\d+\s*,\s*(\[.*?\])", resp.text, re.DOTALL)
+        if m:
+            import json as _json
+            return [t["name"] for t in _json.loads(m.group(1))]
+    except Exception as e:
+        logger.warning("Steam store tags failed for appid %d: %s", appid, e)
+    return []
 
 
 def fetch_steam_reviews(appid: int, start_date: int = -1, end_date: int = -1) -> Optional[Dict]:
@@ -283,6 +303,7 @@ def enrich_apps(
                 record["positive"] = review_data["positive"]
                 record["negative"] = review_data["negative"]
 
+            record["tags"] = fetch_steam_store_tags(appid)
             record["followers"] = fetch_steam_group_followers(appid)
 
             release_date = record.get("release_date")
