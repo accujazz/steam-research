@@ -305,19 +305,17 @@ with tab3:
     if not enriched:
         st.info("No data to chart.")
     else:
-        top_n = st.slider("Top N games", 5, 50, 20)
         chart_df = df.reset_index().copy()
 
         col1, col2 = st.columns(2)
 
         with col1:
             st.subheader("Reviews (30d)")
-            r30 = chart_df[chart_df["reviews_30d"].notna()].nlargest(top_n, "reviews_30d")
+            r30 = chart_df[chart_df["reviews_30d"].notna()].sort_values("reviews_30d", ascending=False)
             if not r30.empty:
                 fig1 = px.bar(r30, x="reviews_30d", y="name", orientation="h",
                               labels={"reviews_30d": "Reviews (30d)", "name": ""},
-                              color="is_early_access",
-                              color_discrete_map={True: "#f0a500", False: "#1a9de0"})
+                              color_discrete_sequence=["#1a9de0"])
                 fig1.update_layout(yaxis={"categoryorder": "total ascending"}, showlegend=False)
                 st.plotly_chart(fig1, use_container_width=True)
             else:
@@ -325,12 +323,11 @@ with tab3:
 
         with col2:
             st.subheader("Revenue (30d)")
-            rev30 = chart_df[chart_df["revenue_30d"].notna()].nlargest(top_n, "revenue_30d")
+            rev30 = chart_df[chart_df["revenue_30d"].notna()].sort_values("revenue_30d", ascending=False)
             if not rev30.empty:
                 fig2 = px.bar(rev30, x="revenue_30d", y="name", orientation="h",
                               labels={"revenue_30d": "Revenue 30d ($)", "name": ""},
-                              color="is_early_access",
-                              color_discrete_map={True: "#f0a500", False: "#1a9de0"})
+                              color_discrete_sequence=["#1a9de0"])
                 fig2.update_layout(yaxis={"categoryorder": "total ascending"}, showlegend=False)
                 st.plotly_chart(fig2, use_container_width=True)
             else:
