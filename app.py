@@ -305,48 +305,55 @@ with tab3:
     if not enriched:
         st.info("No data to chart.")
     else:
-        rev_q = compute_quartiles(enriched, "revenue_estimate")
+        top_n = st.slider("Top N games", 5, 50, 20)
+        chart_df = df.reset_index().copy()
 
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("Revenue Distribution")
-            plot_df = df[df["revenue_estimate"] > 0].copy() if "revenue_estimate" in df.columns else pd.DataFrame()
-            if not plot_df.empty:
-                fig = px.histogram(
-                    plot_df,
-                    x="revenue_estimate",
-                    nbins=40,
-                    log_x=True,
-                    labels={"revenue_estimate": "Revenue Estimate ($)"},
-                )
-                for key, color in [("Q1", "orange"), ("median", "red"), ("Q3", "green")]:
-                    fig.add_vline(x=rev_q[key], line_dash="dash", line_color=color,
-                                  annotation_text=key, annotation_position="top")
-                st.plotly_chart(fig, use_container_width=True)
+            st.subheader("Reviews (30d)")
+            r30 = chart_df[chart_df["reviews_30d"].notna()].nlargest(top_n, "reviews_30d")
+            if not r30.empty:
+                fig1 = px.bar(r30, x="reviews_30d", y="name", orientation="h",
+                              labels={"reviews_30d": "Reviews (30d)", "name": ""},
+                              color="is_early_access",
+                              color_discrete_map={True: "#f0a500", False: "#1a9de0"})
+                fig1.update_layout(yaxis={"categoryorder": "total ascending"}, showlegend=False)
+                st.plotly_chart(fig1, use_container_width=True)
             else:
-                st.info("No paid games to chart.")
+                st.info("No 30d review data available.")
 
         with col2:
-            st.subheader("Price vs. Reviews")
-            if "price_usd" in df.columns and "total_reviews" in df.columns:
-                scatter_df = df[(df["price_usd"] > 0) & (df["total_reviews"] > 0)].copy()
-                scatter_df["ea_label"] = scatter_df["is_early_access"].map(
-                    {True: "Early Access", False: "Full Release"}
-                )
-                if not scatter_df.empty:
-                    fig2 = px.scatter(
-                        scatter_df.reset_index(),
-                        x="price_usd",
-                        y="total_reviews",
-                        size="revenue_estimate",
-                        color="ea_label",
-                        hover_data=["name"],
-                        labels={
-                            "price_usd": "Price ($)",
-                            "total_reviews": "Total Reviews",
-                            "ea_label": "",
-                        },
-                        size_max=40,
-                    )
-                    st.plotly_chart(fig2, use_container_width=True)
+            st.subheader("Revenue (30d)")
+            rev30 = chart_df[chart_df["revenue_30d"].notna()].nlargest(top_n, "revenue_30d")
+            if not rev30.empty:
+                fig2 = px.bar(rev30, x="revenue_30d", y="name", orientation="h",
+                              labels={"revenue_30d": "Revenue 30d ($)", "name": ""},
+                              color="is_early_access",
+                              color_discrete_map={True: "#f0a500", False: "#1a9de0"})
+                fig2.update_layout(yaxis={"categoryorder": "total ascending"}, showlegend=False)
+                st.plotly_chart(fig2, use_container_width=True)
+            else:
+                st.info("No 30d revenue data available.")
+
+        st.subheader("Wishlists vs Revenue (30d)")
+        scatter_df = chart_df[
+            chart_df["wishlist_estimate"].notna() &
+            chart_df["revenue_30d"].notna() &
+            (chart_df["wishlist_estimate"] > 0)
+        ].copy()
+        if not scatter_df.empty:
+            scatter_df["ea_label"] = scatter_df["is_early_access"].map(
+                {True: "Early Access", False: "Full Release"}
+            )
+            fig3 = px.scatter(
+                scatter_df,
+                x="wishlist_estimate",
+                y="revenue_30d",
+                hover_data=["name"],
+                color="ea_label",
+                labels={"wishlist_estimate": "Wishlists Est.", "revenue_30d": "Revenue 30d ($)", "ea_label": ""},
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+        else:
+            st.info("Not enough data for scatter.")
