@@ -26,7 +26,12 @@ Building a Streamlit dashboard for Steam game market research. The dashboard fet
 No third party tools other than Steam itself are being used.
 
 ## Run locally
-python3 -m streamlit run app.py
+1. Install dependencies
+	- python3 -m pip install -r requirements.txt
+2. Run the app
+	- python3 -m streamlit run app.py
+
+The app opens at http://localhost:8501
 
 ## Usage
 1. Define Your Genre via Steam Tags.
