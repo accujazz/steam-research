@@ -346,4 +346,4 @@ def list_cache_files(cache_dir: str = "cache") -> List[str]:
         for f in os.listdir(cache_dir)
         if f.endswith(".json")
     ]
-    return sorted(files, reverse=True)
+    return sorted(files, key=os.path.getmtime, reverse=True)
