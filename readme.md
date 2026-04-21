@@ -34,7 +34,7 @@ No third party tools other than Steam itself are being used.
 The app opens at http://localhost:8501
 
 ## Usage
-1. Define Your Genre via Steam Tags.
+1. Define your genre via Steam tags.
 2. Go to [SteamDB Tag Explorer](steamdb.info/tags/), select relevant games and copy their App IDs.
 2. Paste App IDs from the previous step into the Data Source sidebar section.
 3. Fetch Data.
