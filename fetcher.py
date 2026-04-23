@@ -243,7 +243,8 @@ def discover_apps(
             logger.warning("Tag not found in Steam tag list: '%s'", tag)
             continue
         try:
-            apps = fetch_steam_search_apps(tag_id, max_results=max_results)
+            per_tag_max = None if logic == "AND" else max_results
+        apps = fetch_steam_search_apps(tag_id, max_results=per_tag_max)
             per_tag_results.append(apps)
             time.sleep(1.0)
         except Exception as e:
