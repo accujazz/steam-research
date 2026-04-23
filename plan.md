@@ -21,11 +21,18 @@
 [Discovery Layer]
   Steam tag name → ID lookup (populartags/english)
   Steam search API → candidate App IDs (paginated, 100/page)
-  max_results cap applied here
+  AND: fetch up to _AND_TAG_FETCH_LIMIT (500) per tag, then intersect
+  OR:  fetch up to max_results per tag, then union
+  No max_results cap here — applied after enrichment
+        ↓
+[Confirmation Modal]  (tag discovery only)
+  Show discovered game count → Proceed / Cancel
+  Three-step session state: pending_fetch → fetch_confirmed → fetch_running
         ↓
 [Enrichment Layer]
   Per-app: Steam Store API → min_reviews filter → Steam Review API (total + 3 windows)
            → Community Group XML (followers)
+  After enrichment: sort by total reviews desc, truncate to max_results
         ↓
 [Calculation Layer]
   Revenue formula (coefficients: sales coeff, regional, Steam cut)
@@ -146,6 +153,9 @@ def build_game_record(appid, name, store_data) -> GameRecord
 
 def discover_apps(tags, logic: 'AND'|'OR', max_results=None) -> dict[int, str]
     # Looks up tag IDs, paginates Steam search, applies AND/OR logic
+    # AND: fetches up to _AND_TAG_FETCH_LIMIT (500) per tag, then intersects
+    # OR:  fetches up to max_results per tag, then unions
+    # No final cap — caller truncates after enrichment sorted by reviews
     # Tags not in Steam's 446 popular tags are skipped with a warning
 
 def enrich_apps(appids, names=None, progress_callback=None, store_delay=1.5, min_reviews=0)
@@ -189,6 +199,14 @@ def to_dataframe(records) -> pd.DataFrame
 - Fetch Data button.
 
 Changing coefficients re-runs `enrich_records()` without re-fetching.
+
+**Tag discovery confirmation modal:**
+After discovery completes, a `@st.dialog` modal shows the count of discovered games and Proceed / Cancel buttons. Three-step session state machine:
+1. `pending_fetch` only → show modal
+2. `fetch_confirmed` set (Proceed clicked) → pop flag, set `fetch_running`, rerun (closes modal in a clean render cycle)
+3. `fetch_running` set → run enrichment, show progress bar
+
+After enrichment: records sorted by `positive + negative` (total reviews) descending, then truncated to `max_results`. Cancel clears `pending_fetch` and aborts.
 
 **Main area header:** active run name displayed as `st.header` (h2) with a 🗑️ delete button — deletes the JSON file, clears session, returns to empty state.
 
@@ -238,4 +256,11 @@ Defaults: `sales_coeff=0.7`, `regional_coeff=0.65`, `steam_cut=0.30`, `taxes=0.1
 Price uses `price_overview.initial` (non-discounted) from Steam Store API.
 
 ### Tag discovery pre-filtering
-`min_reviews` (default 100) applied in `enrich_apps` after `fetch_steam_store` using `recommendations.total` — skips expensive Review API + followers + window calls for low-review games. `max_results` (default 200) caps pagination at search time.
+`min_reviews` (default 100) applied in `enrich_apps` after `fetch_steam_store` using `recommendations.total` — skips expensive Review API + followers + window calls for low-review games.
+
+### max_results cap moved to post-enrichment
+Previously `max_results` was applied inside `discover_apps` (per-tag for AND), which caused incomplete AND intersections — games with both tags but ranked below `max_results` in either tag's search results were silently dropped. Now:
+- AND: each tag fetches up to `_AND_TAG_FETCH_LIMIT = 500` (fetcher.py constant), intersection computed from full sets
+- OR: each tag still capped at `max_results` during search (union of top-N per tag)
+- Final truncation happens after `enrich_apps`: records sorted by `positive + negative` descending, then `records[:max_results]`
+- Result: `max_results` returns the most-reviewed games from the full intersection/union, not an arbitrary slice

@@ -115,6 +115,62 @@ def _parse_manual_ids(raw: str) -> list[int]:
     return ids
 
 
+@st.dialog("Confirm Fetch")
+def _confirm_fetch_dialog(count: int):
+    st.write(f"Discovered **{count}** games. Fetching details for all of them may take several minutes.")
+    col1, col2 = st.columns(2)
+    if col1.button("Proceed", type="primary", use_container_width=True):
+        st.session_state["fetch_confirmed"] = True
+        st.rerun()
+    if col2.button("Cancel", use_container_width=True):
+        del st.session_state["pending_fetch"]
+        st.rerun()
+
+
+def _run_enrichment(pending: dict):
+    discovered = pending["discovered"]
+    appids = list(discovered.keys())
+
+    progress_bar = st.progress(0, text="Fetching app details…")
+
+    def _progress(current: int, total: int, name: str):
+        progress_bar.progress(current / total, text=f"[{current}/{total}] {name}")
+
+    records = enrich_apps(
+        appids,
+        names=discovered,
+        progress_callback=_progress,
+        min_reviews=pending["min_tag_reviews"],
+    )
+    progress_bar.empty()
+
+    records.sort(key=lambda r: r.get("positive", 0) + r.get("negative", 0), reverse=True)
+    records = records[:pending["max_results"]]
+
+    if not records:
+        st.error("No records returned.")
+        st.stop()
+
+    cache_path = save_cache(records, pending["slug"])
+    st.success(f"Fetched {len(records)} games. Saved to `{cache_path}`.")
+    st.session_state["records"] = records
+    st.session_state["active_run"] = cache_path
+    st.query_params["run"] = cache_path
+    st.rerun()
+
+
+if "pending_fetch" in st.session_state:
+    if st.session_state.get("fetch_running"):
+        pending = st.session_state.pop("pending_fetch")
+        st.session_state.pop("fetch_running")
+        _run_enrichment(pending)
+    elif st.session_state.get("fetch_confirmed"):
+        st.session_state.pop("fetch_confirmed")
+        st.session_state["fetch_running"] = True
+        st.rerun()  # clean render cycle: dialog closes, then next run starts enrichment
+    else:
+        _confirm_fetch_dialog(len(st.session_state["pending_fetch"]["discovered"]))
+
 if fetch_btn:
     if mode == "Tag Discovery":
         tags = [t.strip() for t in tags_input.split(",") if t.strip()]
@@ -129,8 +185,14 @@ if fetch_btn:
             st.warning("No apps found for those tags.")
             st.stop()
 
-        appids = list(discovered.keys())
-        st.info(f"Found {len(appids)} apps. Fetching details…")
+        st.session_state["pending_fetch"] = {
+            "discovered": discovered,
+            "max_results": int(max_results),
+            "min_tag_reviews": int(min_tag_reviews),
+            "slug": slug_input.strip().replace(" ", "_") or "research",
+        }
+        _confirm_fetch_dialog(len(discovered))
+        st.stop()
     else:
         discovered = {}
         appids = _parse_manual_ids(ids_input)
@@ -138,32 +200,30 @@ if fetch_btn:
             st.error("Enter at least one valid App ID.")
             st.stop()
 
-    progress_bar = st.progress(0, text="Fetching app details…")
+        progress_bar = st.progress(0, text="Fetching app details…")
 
-    def _progress(current: int, total: int, name: str):
-        pct = current / total
-        progress_bar.progress(pct, text=f"[{current}/{total}] {name}")
+        def _progress(current: int, total: int, name: str):
+            progress_bar.progress(current / total, text=f"[{current}/{total}] {name}")
 
-    records = enrich_apps(
-        appids,
-        names=discovered,
-        progress_callback=_progress,
-        min_reviews=int(min_tag_reviews),
-    )
-    progress_bar.empty()
+        records = enrich_apps(
+            appids,
+            names=discovered,
+            progress_callback=_progress,
+            min_reviews=int(min_tag_reviews),
+        )
+        progress_bar.empty()
 
-    if not records:
-        st.error("No records returned.")
-        st.stop()
+        if not records:
+            st.error("No records returned.")
+            st.stop()
 
-    slug = slug_input.strip().replace(" ", "_") or "research"
-    cache_path = save_cache(records, slug)
-    st.success(f"Fetched {len(records)} games. Saved to `{cache_path}`.")
-
-    st.session_state["records"] = records
-    st.session_state["active_run"] = cache_path
-    st.query_params["run"] = cache_path
-    st.rerun()
+        slug = slug_input.strip().replace(" ", "_") or "research"
+        cache_path = save_cache(records, slug)
+        st.success(f"Fetched {len(records)} games. Saved to `{cache_path}`.")
+        st.session_state["records"] = records
+        st.session_state["active_run"] = cache_path
+        st.query_params["run"] = cache_path
+        st.rerun()
 
 
 # ── Main Dashboard ────────────────────────────────────────────────────────────

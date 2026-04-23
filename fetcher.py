@@ -18,6 +18,7 @@ STEAM_APP_PAGE_URL = "https://store.steampowered.com/app"
 STEAM_SEARCH_URL = "https://store.steampowered.com/search/results/"
 
 _tag_cache: Optional[Dict[str, int]] = None  # name_lower -> tagid
+_AND_TAG_FETCH_LIMIT = 500  # per-tag cap when using AND; large enough for a good intersection without timing out
 
 
 class GameRecord(TypedDict, total=False):
@@ -243,8 +244,8 @@ def discover_apps(
             logger.warning("Tag not found in Steam tag list: '%s'", tag)
             continue
         try:
-            per_tag_max = None if logic == "AND" else max_results
-        apps = fetch_steam_search_apps(tag_id, max_results=per_tag_max)
+            per_tag_max = _AND_TAG_FETCH_LIMIT if logic == "AND" else max_results
+            apps = fetch_steam_search_apps(tag_id, max_results=per_tag_max)
             per_tag_results.append(apps)
             time.sleep(1.0)
         except Exception as e:
@@ -262,9 +263,6 @@ def discover_apps(
         merged: Dict[int, str] = {}
         for r in per_tag_results:
             merged.update(r)
-
-    if max_results and len(merged) > max_results:
-        merged = dict(list(merged.items())[:max_results])
 
     return merged
 
