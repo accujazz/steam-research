@@ -1,4 +1,5 @@
 import io
+import json
 import logging
 import os
 
@@ -322,11 +323,13 @@ with tab2:
     ]
     fdf = to_dataframe(filtered)
     fdf["store_url"] = fdf.index.map(lambda a: f"https://store.steampowered.com/app/{a}/")
-    cols_present = [c for c in display_cols if c in fdf.columns]
+    fdf.insert(0, "delete", False)
+    cols_present = ["delete"] + [c for c in display_cols if c in fdf.columns]
 
-    st.dataframe(
+    edited = st.data_editor(
         fdf[cols_present],
         column_config={
+            "delete": st.column_config.CheckboxColumn("🗑️", width="small"),
             "name": st.column_config.TextColumn("Name"),
             "store_url": st.column_config.LinkColumn("Steam Page", display_text="Open"),
             "total_reviews": st.column_config.NumberColumn("Reviews (total)"),
@@ -344,13 +347,31 @@ with tab2:
             "is_early_access": st.column_config.CheckboxColumn("EA"),
             "release_date": st.column_config.DateColumn("Released"),
         },
+        disabled=[c for c in cols_present if c != "delete"],
         use_container_width=True,
         height=500,
+        key="games_table",
     )
+
+    to_delete = edited.index[edited["delete"]].tolist()
+    if to_delete:
+        if st.button(f"Delete {len(to_delete)} selected game{'s' if len(to_delete) != 1 else ''}", type="primary"):
+            st.session_state["records"] = [
+                r for r in st.session_state["records"] if r["appid"] not in to_delete
+            ]
+            if active_run and os.path.exists(active_run):
+                with open(active_run, "r", encoding="utf-8") as _f:
+                    _payload = json.load(_f)
+                _payload["games"] = st.session_state["records"]
+                _payload["meta"]["count"] = len(st.session_state["records"])
+                with open(active_run, "w", encoding="utf-8") as _f:
+                    json.dump(_payload, _f, ensure_ascii=False, indent=2)
+            st.rerun()
 
     if filtered:
         buf = io.BytesIO()
-        fdf[cols_present].to_excel(buf, index=True, engine="openpyxl")
+        export_cols = [c for c in cols_present if c != "delete"]
+        fdf[export_cols].to_excel(buf, index=True, engine="openpyxl")
         st.download_button(
             "Export to XLSX",
             data=buf.getvalue(),
