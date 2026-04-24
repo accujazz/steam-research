@@ -36,9 +36,9 @@ No third party services other than Steam itself are being used for data.
 The app opens at http://localhost:8501
 
 ## Usage
-1. Define your genre via Steam tags.
-2. Go to [SteamDB Tag Explorer](steamdb.info/tags/), select relevant games and copy their App IDs.
-2. Paste App IDs from the previous step into the Data Source sidebar section.
+1. Define your target genres via Steam tags.
+2. Go to [SteamDB Tag Explorer](https://steamdb.info/tags/), select relevant games and copy their App IDs.
+2. Paste App IDs from the previous step or target genres into the Data Source sidebar section.
 3. Fetch Data.
 4. Filter for revelance if needed. Parameters to consider:
 	- Market relevance (Release date > 2020)

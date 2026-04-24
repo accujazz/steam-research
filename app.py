@@ -263,6 +263,15 @@ if fetch_btn:
 
 if "records" not in st.session_state:
     st.info("Use the sidebar to fetch data or load a previous run.")
+    try:
+        _readme = open("readme.md", encoding="utf-8").read()
+        _usage_start = _readme.find("## Usage")
+        if _usage_start != -1:
+            _next_section = _readme.find("\n## ", _usage_start + 1)
+            _usage = _readme[_usage_start: _next_section if _next_section != -1 else None]
+            st.markdown(_usage)
+    except FileNotFoundError:
+        pass
     st.stop()
 
 active_run = st.session_state.get("active_run")
