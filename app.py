@@ -116,61 +116,111 @@ def _parse_manual_ids(raw: str) -> list[int]:
     return ids
 
 
-@st.dialog("Confirm Fetch")
-def _confirm_fetch_dialog(count: int):
-    st.write(f"Discovered **{count}** games. Fetching details for all of them may take several minutes.")
-    col1, col2 = st.columns(2)
-    if col1.button("Proceed", type="primary", use_container_width=True):
-        st.session_state["fetch_confirmed"] = True
-        st.rerun()
-    if col2.button("Cancel", use_container_width=True):
-        del st.session_state["pending_fetch"]
-        st.rerun()
+def _confirm_fetch_banner(count: int):
+    with st.container(border=True):
+        st.write(f"Discovered **{count}** games. Fetching details for all of them may take several minutes.")
+        col1, col2, _ = st.columns([1, 1, 5])
+        if col1.button("Proceed", type="primary", use_container_width=True, key="fetch_proceed_btn"):
+            st.session_state["fetch_confirmed"] = True
+            st.rerun()
+        if col2.button("Cancel", use_container_width=True, key="fetch_cancel_btn"):
+            del st.session_state["pending_fetch"]
+            st.rerun()
 
 
-def _run_enrichment(pending: dict):
-    discovered = pending["discovered"]
-    appids = list(discovered.keys())
+def _confirm_add_banner(count: int):
+    with st.container(border=True):
+        st.write(f"Found **{count}** new games to fetch. This may take several minutes.")
+        col1, col2, _ = st.columns([1, 1, 5])
+        if col1.button("Proceed", type="primary", use_container_width=True, key="add_proceed_btn"):
+            st.session_state["add_confirmed"] = True
+            st.rerun()
+        if col2.button("Cancel", use_container_width=True, key="add_cancel_confirm_btn"):
+            st.session_state.pop("add_pending", None)
+            st.rerun()
 
-    progress_bar = st.progress(0, text="Fetching app details…")
 
-    def _progress(current: int, total: int, name: str):
-        progress_bar.progress(current / total, text=f"[{current}/{total}] {name}")
-
-    records = enrich_apps(
-        appids,
-        names=discovered,
-        progress_callback=_progress,
-        min_reviews=pending["min_tag_reviews"],
-    )
-    progress_bar.empty()
-
-    records.sort(key=lambda r: r.get("positive", 0) + r.get("negative", 0), reverse=True)
-    records = records[:pending["max_results"]]
-
-    if not records:
-        st.error("No records returned.")
-        st.stop()
-
-    cache_path = save_cache(records, pending["slug"])
-    st.success(f"Fetched {len(records)} games. Saved to `{cache_path}`.")
-    st.session_state["records"] = records
-    st.session_state["active_run"] = cache_path
-    st.query_params["run"] = cache_path
+def _start_enrichment(discovered: dict, params: dict, enrichment_type: str):
+    st.session_state["enriching"] = {
+        "type": enrichment_type,
+        "queue": list(discovered.keys()),
+        "names": discovered,
+        "done": [],
+        "total": len(discovered),
+        "max_results": params["max_results"],
+        "min_reviews": params["min_tag_reviews"],
+        "slug": params.get("slug", ""),
+        "active_run": st.session_state.get("active_run", ""),
+    }
     st.rerun()
 
 
 if "pending_fetch" in st.session_state:
-    if st.session_state.get("fetch_running"):
+    if st.session_state.get("fetch_confirmed"):
         pending = st.session_state.pop("pending_fetch")
-        st.session_state.pop("fetch_running")
-        _run_enrichment(pending)
-    elif st.session_state.get("fetch_confirmed"):
         st.session_state.pop("fetch_confirmed")
-        st.session_state["fetch_running"] = True
-        st.rerun()  # clean render cycle: dialog closes, then next run starts enrichment
+        _start_enrichment(pending["discovered"], pending, "main")
     else:
-        _confirm_fetch_dialog(len(st.session_state["pending_fetch"]["discovered"]))
+        _confirm_fetch_banner(len(st.session_state["pending_fetch"]["discovered"]))
+
+if "add_pending" in st.session_state:
+    if st.session_state.get("add_confirmed"):
+        pending = st.session_state.pop("add_pending")
+        st.session_state.pop("add_confirmed")
+        _start_enrichment(pending["discovered"], pending, "add")
+    else:
+        _confirm_add_banner(len(st.session_state["add_pending"]["discovered"]))
+
+if "enriching" in st.session_state:
+    e = st.session_state["enriching"]
+    done_count = len(e["done"])
+    total = e["total"]
+    next_name = e["names"].get(e["queue"][0], "") if e["queue"] else ""
+    pct = done_count / total if total else 0
+    label = f"[{done_count}/{total}] {next_name}" if next_name else f"[{done_count}/{total}]"
+    st.progress(pct, text=label)
+    if st.button("⏹ Cancel fetch", key="cancel_enrichment_btn"):
+        st.session_state.pop("enriching")
+        st.rerun()
+
+    if e["queue"]:
+        appid = e["queue"].pop(0)
+        new_records = enrich_apps([appid], names=e["names"], min_reviews=e["min_reviews"])
+        e["done"].extend(new_records)
+        st.rerun()
+    else:
+        records = e["done"]
+        records.sort(key=lambda r: r.get("positive", 0) + r.get("negative", 0), reverse=True)
+        records = records[:e["max_results"]]
+        st.session_state.pop("enriching")
+
+        if e["type"] == "main":
+            if records:
+                cache_path = save_cache(records, e["slug"])
+                st.session_state["records"] = records
+                st.session_state["active_run"] = cache_path
+                st.query_params["run"] = cache_path
+                st.toast(f"Fetched {len(records)} games.")
+            else:
+                st.toast("No records returned.", icon="⚠️")
+        else:
+            if records:
+                st.session_state["records"] = st.session_state.get("records", []) + records
+                run_path = e.get("active_run", "")
+                if run_path and os.path.exists(run_path):
+                    with open(run_path, "r", encoding="utf-8") as _f:
+                        payload = json.load(_f)
+                    payload["games"] = st.session_state["records"]
+                    payload["meta"]["count"] = len(st.session_state["records"])
+                    with open(run_path, "w", encoding="utf-8") as _f:
+                        json.dump(payload, _f, ensure_ascii=False, indent=2)
+                st.toast(f"Added {len(records)} games.")
+            else:
+                st.toast("No new records returned.", icon="⚠️")
+
+        st.rerun()
+
+    st.stop()
 
 if fetch_btn:
     if mode == "Tag Discovery":
@@ -192,39 +242,21 @@ if fetch_btn:
             "min_tag_reviews": int(min_tag_reviews),
             "slug": slug_input.strip().replace(" ", "_") or "research",
         }
-        _confirm_fetch_dialog(len(discovered))
-        st.stop()
+        st.rerun()
     else:
-        discovered = {}
         appids = _parse_manual_ids(ids_input)
         if not appids:
             st.error("Enter at least one valid App ID.")
             st.stop()
-
-        progress_bar = st.progress(0, text="Fetching app details…")
-
-        def _progress(current: int, total: int, name: str):
-            progress_bar.progress(current / total, text=f"[{current}/{total}] {name}")
-
-        records = enrich_apps(
-            appids,
-            names=discovered,
-            progress_callback=_progress,
-            min_reviews=int(min_tag_reviews),
+        _start_enrichment(
+            {i: str(i) for i in appids},
+            {
+                "max_results": len(appids),
+                "min_tag_reviews": int(min_tag_reviews),
+                "slug": slug_input.strip().replace(" ", "_") or "research",
+            },
+            "main",
         )
-        progress_bar.empty()
-
-        if not records:
-            st.error("No records returned.")
-            st.stop()
-
-        slug = slug_input.strip().replace(" ", "_") or "research"
-        cache_path = save_cache(records, slug)
-        st.success(f"Fetched {len(records)} games. Saved to `{cache_path}`.")
-        st.session_state["records"] = records
-        st.session_state["active_run"] = cache_path
-        st.query_params["run"] = cache_path
-        st.rerun()
 
 
 # ── Main Dashboard ────────────────────────────────────────────────────────────
@@ -239,7 +271,7 @@ def _is_local() -> bool:
     return host.startswith("localhost") or host.startswith("127.0.0.1")
 
 if active_run:
-    col_title, col_del = st.columns([8, 1])
+    col_title, col_add, col_del = st.columns([7, 1, 1])
     col_title.header(_run_label(active_run))
     if _is_local() and col_del.button("🗑️", help="Delete this run", key="delete_run"):
         if os.path.exists(active_run):
@@ -248,6 +280,52 @@ if active_run:
         del st.session_state["active_run"]
         st.query_params.clear()
         st.rerun()
+    fetching_active = any(k in st.session_state for k in ("pending_fetch", "add_pending", "enriching"))
+    if not fetching_active and col_add.button("➕", help="Add more games to this run", key="add_games_btn"):
+        st.session_state["add_form_open"] = True
+
+if st.session_state.get("add_form_open"):
+    with st.expander("Add games", expanded=True):
+        add_mode = st.radio("Input mode", ["Tag Discovery", "Manual App IDs"], key="add_mode")
+        if add_mode == "Tag Discovery":
+            add_tags_input = st.text_input("Tags (comma-separated)", key="add_tags")
+            add_logic = st.radio("Tag logic", ["AND", "OR"], key="add_logic")
+            add_max = st.number_input("Max games to add", 10, 2000, 50, step=10, key="add_max")
+        else:
+            add_ids_input = st.text_area("App IDs (one per line or comma-separated)", key="add_ids")
+            add_max = st.number_input("Max games to add", 10, 2000, 50, step=10, key="add_max_manual")
+        add_min_reviews = st.number_input("Min reviews (pre-filter)", 0, 100000, 100, step=50, key="add_min_reviews")
+
+        if st.button("Fetch", type="primary", key="add_fetch_btn"):
+            existing_ids = {r["appid"] for r in st.session_state["records"]}
+            if add_mode == "Tag Discovery":
+                tags = [t.strip() for t in add_tags_input.split(",") if t.strip()]
+                if not tags:
+                    st.error("Enter at least one tag.")
+                    st.stop()
+                with st.spinner("Discovering apps by tag…"):
+                    discovered = discover_apps(tags, logic=add_logic, max_results=int(add_max))
+                new_discovered = {k: v for k, v in discovered.items() if k not in existing_ids}
+            else:
+                all_ids = _parse_manual_ids(add_ids_input)
+                new_discovered = {i: str(i) for i in all_ids if i not in existing_ids}
+
+            if not new_discovered:
+                st.warning("No new games found (all already in results).")
+                st.stop()
+
+            st.session_state["add_pending"] = {
+                "discovered": new_discovered,
+                "max_results": int(add_max),
+                "min_tag_reviews": int(add_min_reviews),
+            }
+            st.session_state["add_form_open"] = False
+            st.rerun()
+
+        if st.button("Cancel", key="add_cancel_btn"):
+            st.session_state.pop("add_form_open", None)
+            st.rerun()
+
 
 raw_records = st.session_state["records"]
 

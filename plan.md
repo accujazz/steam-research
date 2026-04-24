@@ -25,14 +25,16 @@
   OR:  fetch up to max_results per tag, then union
   No max_results cap here — applied after enrichment
         ↓
-[Confirmation Modal]  (tag discovery only)
+[Confirmation Banner]  (tag discovery only; inline bordered container, not a modal)
   Show discovered game count → Proceed / Cancel
-  Three-step session state: pending_fetch → fetch_confirmed → fetch_running
+  State: pending_fetch → fetch_confirmed → _start_enrichment
         ↓
-[Enrichment Layer]
-  Per-app: Steam Store API → min_reviews filter → Steam Review API (total + 3 windows)
-           → Community Group XML (followers)
-  After enrichment: sort by total reviews desc, truncate to max_results
+[Incremental Enrichment Layer]  (one game per Streamlit rerun)
+  State: enriching { type, queue, names, done, total, max_results, min_reviews, slug, active_run }
+  Each rerun: pop one appid from queue → enrich_apps([appid]) → append to done → rerun
+  Progress bar + ⏹ Cancel fetch button shown on every rerun
+  Cancel: pop enriching from session_state, discard partial results
+  Finalize: sort done by total reviews desc, truncate to max_results, save cache
         ↓
 [Calculation Layer]
   Revenue formula (coefficients: sales coeff, regional, Steam cut)
@@ -43,9 +45,10 @@
         ↓
 [Streamlit Dashboard]
   Summary stats panel (quartile table)
-  Games table (sortable, filterable)
+  Games table (sortable, filterable, per-row delete via checkbox column)
   Charts: revenue distribution, price vs. reviews scatter
   Export to XLSX button
+  ➕ Add games: discover + confirm + incremental enrichment appended to existing run
 ```
 
 ---
@@ -161,6 +164,7 @@ def discover_apps(tags, logic: 'AND'|'OR', max_results=None) -> dict[int, str]
 def enrich_apps(appids, names=None, progress_callback=None, store_delay=1.5, min_reviews=0)
     # Per app: Store API → min_reviews filter (recommendations.total) → Review API
     #          → followers → review windows (30d/1yr/3yr)
+    # Called with a single appid at a time by the incremental enrichment processor
 
 def save_cache(records, slug, cache_dir='cache') -> str
 def load_cache(filepath) -> list[GameRecord]
@@ -200,17 +204,29 @@ def to_dataframe(records) -> pd.DataFrame
 
 Changing coefficients re-runs `enrich_records()` without re-fetching.
 
-**Tag discovery confirmation modal:**
-After discovery completes, a `@st.dialog` modal shows the count of discovered games and Proceed / Cancel buttons. Three-step session state machine:
-1. `pending_fetch` only → show modal
-2. `fetch_confirmed` set (Proceed clicked) → pop flag, set `fetch_running`, rerun (closes modal in a clean render cycle)
-3. `fetch_running` set → run enrichment, show progress bar
+**Confirmation banners (inline, not modals):**
+After tag discovery completes, an inline bordered container shows the game count and Proceed / Cancel buttons. Two-step state machine:
+- `pending_fetch` only → show banner; Proceed sets `fetch_confirmed` → `_start_enrichment("main")`
+- `add_pending` only → show banner; Proceed sets `add_confirmed` → `_start_enrichment("add")`
 
-After enrichment: records sorted by `positive + negative` (total reviews) descending, then truncated to `max_results`. Cancel clears `pending_fetch` and aborts.
+**Incremental enrichment processor:**
+`_start_enrichment(discovered, params, type)` initializes `enriching` in session state and reruns. On each rerun while `enriching` is set:
+- Progress bar shows `[done/total] current_game_name`
+- **⏹ Cancel fetch** button — pops `enriching`, discards partial results, reruns
+- One game is popped from `queue`, processed via `enrich_apps([appid])`, appended to `done`, then reruns
+- When queue empty: sort `done` by `positive + negative` desc, truncate to `max_results`, save/update cache, `st.toast` result, rerun
+- `st.stop()` after processor prevents dashboard from rendering during enrichment
 
-**Main area header:** active run name displayed as `st.header` (h2) with a 🗑️ delete button — deletes the JSON file, clears session, returns to empty state.
+Applies to: main fetch (tag discovery + manual IDs), add games flow. Both use the same processor; `type` field (`"main"` / `"add"`) determines finalization behavior.
 
-**Games Table columns:** name, Steam Page link (`store.steampowered.com/app/<appid>/`, constructed at display time), reviews (total/30d/1yr/3yr), review score, price (initial/non-discounted), revenue (total/30d/1yr/3yr), wishlist est., followers, EA, release date, genres.
+**Main area header:** active run name as `st.header` with ➕ (add games) and 🗑️ (delete run) buttons. ➕ is hidden while `pending_fetch`, `add_pending`, or `enriching` is in session state.
+
+**Add games:**
+➕ opens an expander with tag/manual input, min reviews, max to add. On Fetch: discovers apps, deduplicates against existing appids, stores net-new in `add_pending`, reruns to show confirmation banner. On confirm: `_start_enrichment("add")` — new records appended to existing, cache file updated in-place.
+
+**Games Table:** uses `st.data_editor` with a `🗑️` checkbox column. Checking rows reveals a "Delete N selected game(s)" button that removes them from `session_state["records"]` and overwrites the cache file in-place (preserving original filename). All other columns are `disabled` (read-only).
+
+**Games Table columns:** name, Steam Page link (`store.steampowered.com/app/<appid>/`, constructed at display time), reviews (total/30d/1yr/3yr), review score, price (initial/non-discounted), revenue (total/30d/1yr/3yr), wishlist est., followers, EA, release date, tags.
 Revenue and review fields show empty when the time window hasn't elapsed.
 
 **Charts:** revenue histogram (log scale + quartile lines), price vs reviews scatter (size=revenue, color=EA).
@@ -262,5 +278,8 @@ Price uses `price_overview.initial` (non-discounted) from Steam Store API.
 Previously `max_results` was applied inside `discover_apps` (per-tag for AND), which caused incomplete AND intersections — games with both tags but ranked below `max_results` in either tag's search results were silently dropped. Now:
 - AND: each tag fetches up to `_AND_TAG_FETCH_LIMIT = 500` (fetcher.py constant), intersection computed from full sets
 - OR: each tag still capped at `max_results` during search (union of top-N per tag)
-- Final truncation happens after `enrich_apps`: records sorted by `positive + negative` descending, then `records[:max_results]`
+- Final truncation happens after enrichment: records sorted by `positive + negative` descending, then `records[:max_results]`
 - Result: `max_results` returns the most-reviewed games from the full intersection/union, not an arbitrary slice
+
+### Enrichment is incremental (one game per rerun) to support cancellation
+The original `enrich_apps` blocking loop was replaced with an incremental processor: `_start_enrichment` writes a queue to `session_state["enriching"]`, and on each Streamlit rerun one game is dequeued, enriched, and the page rerenders. This allows a **Cancel** button to be shown between each game. Cancelling discards partial results cleanly. The `enrich_apps` function is still called, but with a single-element list per invocation.
