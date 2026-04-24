@@ -59,7 +59,7 @@ with st.sidebar:
     cache_files = list_cache_files()
     if cache_files:
         st.header("Previous Runs")
-        recent, older = cache_files[:10], cache_files[10:]
+        recent, older = cache_files[:5], cache_files[5:]
         for cf in recent:
             if st.button(_run_label(cf), key=f"run_{cf}", use_container_width=True):
                 st.session_state["records"] = load_cache(cf)
